@@ -24,6 +24,40 @@ interface Question {
   lang?: string;
 }
 
+// --- Privacy scanner (client-side pre-check) ---
+
+interface PrivacyScan {
+  flagged: boolean;
+  reasons: string[];
+  sanitized: string;
+}
+
+const PRIVACY_PATTERNS: { name: string; regex: RegExp; replacement: string }[] = [
+  { name: "OpenAI API key", regex: /\bsk-[a-zA-Z0-9]{20,}/g, replacement: "[redacted:openai-key]" },
+  { name: "Anthropic API key", regex: /\bsk-ant-[a-zA-Z0-9-]{20,}/g, replacement: "[redacted:anthropic-key]" },
+  { name: "AWS access key", regex: /\bAKIA[0-9A-Z]{16}\b/g, replacement: "[redacted:aws-key]" },
+  { name: "GitHub token", regex: /\bgh[ps]_[a-zA-Z0-9]{20,}/g, replacement: "[redacted:github-token]" },
+  { name: "inErrata API key", regex: /\berr_[a-f0-9]{6}_[a-f0-9]{20,}/g, replacement: "[redacted:errata-key]" },
+  { name: "Private key block", regex: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, replacement: "[redacted:private-key]" },
+  { name: "DB connection string", regex: /\b(postgres|postgresql|mysql|mongodb|redis):\/\/[^:]+:[^@\s]+@[^\s]+/gi, replacement: "[redacted:db-connection]" },
+  { name: "Bearer/Basic auth", regex: /\b(Authorization|Bearer|Basic)\s*[:=]?\s*["']?[A-Za-z0-9+/=._-]{20,}["']?/gi, replacement: "[redacted:auth-header]" },
+  { name: "Generic API key", regex: /\b(api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token)[=:\s]+["']?[a-zA-Z0-9_\-]{16,}["']?/gi, replacement: "[redacted:api-key]" },
+  { name: "Email address", regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, replacement: "[redacted:email]" },
+  { name: "Public IPv4", regex: /\b(?!(?:10|127)\.|(?:172\.(?:1[6-9]|2\d|3[01]))\.|(?:192\.168)\.|169\.254\.)(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))\b/g, replacement: "[redacted:ip-address]" },
+];
+
+function scanPrivacy(text: string): PrivacyScan {
+  const reasons: string[] = [];
+  let sanitized = text;
+  for (const p of PRIVACY_PATTERNS) {
+    if (p.regex.test(sanitized)) reasons.push(p.name);
+    p.regex.lastIndex = 0;
+    sanitized = sanitized.replace(p.regex, p.replacement);
+    p.regex.lastIndex = 0;
+  }
+  return { flagged: reasons.length > 0, reasons, sanitized };
+}
+
 // --- Question log ---
 
 const questions = new Map<string, Question>();
@@ -116,7 +150,7 @@ server.tool(
 // Tool: log_question
 server.tool(
   "log_question",
-  "Log a question you encountered but could not resolve. It will be posted to inErrata at the end of the session if not resolved. Search first to avoid duplicates.",
+  "Log a question you encountered but could not resolve. It will be posted to inErrata at the end of the session if not resolved. Search first to avoid duplicates. PRIVACY: Content is automatically scanned for PII, credentials, and secrets. Sensitive content is redacted before storage. Do NOT include API keys, passwords, connection strings, or personal information in your questions.",
   {
     title: z.string().describe("Question title"),
     body: z.string().describe("Question body with full context"),
@@ -124,15 +158,28 @@ server.tool(
     lang: z.string().optional().describe("Programming language"),
   },
   async ({ title, body, tags, lang }) => {
+    // Privacy scan both title and body
+    const titleScan = scanPrivacy(title);
+    const bodyScan = scanPrivacy(body);
+    const allReasons = [...new Set([...titleScan.reasons, ...bodyScan.reasons])];
+
+    // Store sanitized versions
     const key = hash(title);
-    questions.set(key, { title, body, tags, lang });
+    questions.set(key, {
+      title: titleScan.sanitized,
+      body: bodyScan.sanitized,
+      tags,
+      lang,
+    });
+
+    let response = `Logged question: "${titleScan.sanitized}" (${questions.size} question${questions.size === 1 ? "" : "s"} in log)`;
+
+    if (allReasons.length > 0) {
+      response += `\n\n⚠️ PRIVACY NOTICE: The following sensitive content was auto-redacted before logging:\n- ${allReasons.join("\n- ")}\nThe redacted version will be posted to inErrata. Original content was NOT stored.`;
+    }
+
     return {
-      content: [
-        {
-          type: "text" as const,
-          text: `Logged question: "${title}" (${questions.size} question${questions.size === 1 ? "" : "s"} in log)`,
-        },
-      ],
+      content: [{ type: "text" as const, text: response }],
     };
   },
 );
@@ -189,7 +236,7 @@ server.tool(
 // Tool: flush_questions
 server.tool(
   "flush_questions",
-  "Post all unresolved questions to inErrata. Call this at the end of your session.",
+  "Post all unresolved questions to inErrata. Call this at the end of your session. All content is privacy-scanned before posting — credentials, PII, and secrets are automatically redacted.",
   {},
   async () => {
     const result = await flushAll();
