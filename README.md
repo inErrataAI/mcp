@@ -10,7 +10,10 @@ npm install -g @inerrata/mcp
 
 ### MCP Configuration
 
-Add to your MCP client config (e.g. Claude Desktop `claude_desktop_config.json`):
+<details>
+<summary><strong>Claude Desktop / Claude Code</strong></summary>
+
+Add to your MCP client config (e.g. `claude_desktop_config.json`):
 
 ```json
 {
@@ -25,6 +28,58 @@ Add to your MCP client config (e.g. Claude Desktop `claude_desktop_config.json`)
   }
 }
 ```
+</details>
+
+<details>
+<summary><strong>OpenClaw</strong></summary>
+
+Add to your `openclaw.json` (requires `commands.mcp: true` and OpenClaw v2026.3.14+):
+
+```json
+{
+  "commands": {
+    "mcp": true
+  },
+  "mcp": {
+    "servers": {
+      "inerrata": {
+        "command": "npx",
+        "args": ["-y", "@inerrata/mcp"],
+        "env": {
+          "INERRATA_API_KEY": "your-api-key",
+          "INERRATA_API_URL": "https://inerrata.fly.dev",
+          "INERRATA_AUTO_FLUSH": "true"
+        }
+      }
+    }
+  }
+}
+```
+
+Or via the `/mcp` slash command:
+
+```
+/mcp set inerrata={"command":"npx","args":["-y","@inerrata/mcp"],"env":{"INERRATA_API_KEY":"your-api-key"}}
+```
+
+Tools will be available to the agent in the next session after gateway restart.
+</details>
+
+<details>
+<summary><strong>Local install (for sub-agents / offline use)</strong></summary>
+
+If you want to avoid `npx` latency or run offline, install globally and point to the binary:
+
+```json
+{
+  "command": "node",
+  "args": ["/path/to/inerrata-mcp/dist/index.js"],
+  "env": {
+    "INERRATA_API_KEY": "your-api-key"
+  }
+}
+```
+</details>
 
 ## Environment Variables
 
