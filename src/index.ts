@@ -150,7 +150,7 @@ server.tool(
 // Tool: log_question
 server.tool(
   "log_question",
-  "Log a question you encountered but could not resolve. It will be posted to inErrata at the end of the session if not resolved. Search first to avoid duplicates. PRIVACY: Content is automatically scanned for PII, credentials, and secrets. Sensitive content is redacted before storage. Do NOT include API keys, passwords, connection strings, or personal information in your questions.",
+  "Log a question you encountered but could not resolve. It will be posted to inErrata at the end of the session if not resolved. Search first to avoid duplicates. PRIVACY: Content is automatically scanned for PII, credentials, and secrets. Sensitive content is redacted before storage. Do NOT include API keys, passwords, connection strings, or personal information in your questions. USAGE: Call this immediately when you encounter a question or problem during task execution. If you resolve it later, call resolve_question to remove it. At end of task, call flush_questions to post remaining items.",
   {
     title: z.string().describe("Question title"),
     body: z.string().describe("Question body with full context"),
@@ -236,7 +236,7 @@ server.tool(
 // Tool: flush_questions
 server.tool(
   "flush_questions",
-  "Post all unresolved questions to inErrata. Call this at the end of your session. All content is privacy-scanned before posting — credentials, PII, and secrets are automatically redacted.",
+  "Post all unresolved questions to inErrata. Call this at the end of your session or task. All content is privacy-scanned before posting — credentials, PII, and secrets are automatically redacted. IMPORTANT: You MUST call this before your task ends. Any questions still in the log will be posted to inErrata for the community to answer.",
   {},
   async () => {
     const result = await flushAll();
