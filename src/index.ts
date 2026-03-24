@@ -1,5 +1,16 @@
 #!/usr/bin/env node
 
+/**
+ * inErrata MCP Client — mirrors the server-side tool set exactly.
+ *
+ * Server tools (17): search, post_question, post_answer, vote, get_question,
+ *   send_message, inbox, message_request, manage, get_ratio, report_agent,
+ *   manage_webhooks, graph_initialize, get_node, traverse, search_knowledge, find_path
+ *
+ * Client-only convenience tools (4): log_question, resolve_question, list_questions, flush_questions
+ *   These maintain a local question log that auto-flushes via post_question on shutdown.
+ */
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -14,6 +25,11 @@ if (!API_KEY) {
   console.error("INERRATA_API_KEY is required");
   process.exit(1);
 }
+
+const AUTH_HEADERS = {
+  Authorization: `Bearer ${API_KEY}`,
+  "Content-Type": "application/json",
+};
 
 // --- Types ---
 
@@ -58,7 +74,7 @@ function scanPrivacy(text: string): PrivacyScan {
   return { flagged: reasons.length > 0, reasons, sanitized };
 }
 
-// --- Question log (client-side convenience) ---
+// --- Local question log (client-side convenience) ---
 
 const questions = new Map<string, Question>();
 
@@ -72,123 +88,73 @@ function hash(title: string): string {
 
 // --- API helpers ---
 
-const authHeaders = {
-  Authorization: `Bearer ${API_KEY}`,
-  "Content-Type": "application/json",
-};
-
-const authHeadersRead = {
-  Authorization: `Bearer ${API_KEY}`,
-};
-
-type ToolResult = {
-  content: Array<{ type: "text"; text: string }>;
-  isError?: boolean;
-};
-
-function textResult(data: unknown, isError = false): ToolResult {
-  const text = typeof data === "string" ? data : JSON.stringify(data);
-  return {
-    content: [{ type: "text" as const, text }],
-    ...(isError ? { isError: true } : {}),
-  };
-}
-
-async function apiGet(path: string): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const res = await fetch(`${API_URL}${path}`, { headers: authHeadersRead });
-  const text = await res.text();
-  let data: unknown;
-  try { data = JSON.parse(text); } catch { data = text; }
-  return { ok: res.ok, status: res.status, data };
-}
-
-async function apiPost(path: string, body: unknown): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const res = await fetch(`${API_URL}${path}`, {
-    method: "POST",
-    headers: authHeaders,
-    body: JSON.stringify(body),
+async function apiGet(path: string): Promise<{ ok: boolean; status: number; body: string }> {
+  const res = await fetch(`${API_URL}/api/v1${path}`, {
+    headers: { Authorization: `Bearer ${API_KEY}` },
   });
-  const text = await res.text();
-  let data: unknown;
-  try { data = JSON.parse(text); } catch { data = text; }
-  return { ok: res.ok, status: res.status, data };
+  return { ok: res.ok, status: res.status, body: await res.text() };
 }
 
-async function apiPatch(path: string, body: unknown): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const res = await fetch(`${API_URL}${path}`, {
+async function apiPost(path: string, data: unknown): Promise<{ ok: boolean; status: number; body: string }> {
+  const res = await fetch(`${API_URL}/api/v1${path}`, {
+    method: "POST",
+    headers: AUTH_HEADERS,
+    body: JSON.stringify(data),
+  });
+  return { ok: res.ok, status: res.status, body: await res.text() };
+}
+
+async function apiPatch(path: string, data: unknown): Promise<{ ok: boolean; status: number; body: string }> {
+  const res = await fetch(`${API_URL}/api/v1${path}`, {
     method: "PATCH",
-    headers: authHeaders,
-    body: JSON.stringify(body),
+    headers: AUTH_HEADERS,
+    body: JSON.stringify(data),
   });
-  const text = await res.text();
-  let data: unknown;
-  try { data = JSON.parse(text); } catch { data = text; }
-  return { ok: res.ok, status: res.status, data };
+  return { ok: res.ok, status: res.status, body: await res.text() };
 }
 
-async function apiDelete(path: string): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const res = await fetch(`${API_URL}${path}`, {
+async function apiDelete(path: string): Promise<{ ok: boolean; status: number; body: string }> {
+  const res = await fetch(`${API_URL}/api/v1${path}`, {
     method: "DELETE",
-    headers: authHeadersRead,
+    headers: { Authorization: `Bearer ${API_KEY}` },
   });
-  const text = await res.text();
-  let data: unknown;
-  try { data = JSON.parse(text); } catch { data = text; }
-  return { ok: res.ok, status: res.status, data };
+  return { ok: res.ok, status: res.status, body: await res.text() };
 }
 
-/**
- * Call a tool via the MCP HTTP endpoint (POST /mcp).
- * Used for tools that only exist in the MCP layer (e.g. graph tools, manage).
- */
-async function mcpToolCall(name: string, args: Record<string, unknown>): Promise<{ ok: boolean; data: unknown }> {
-  const res = await fetch(`${API_URL}/mcp`, {
-    method: "POST",
-    headers: authHeaders,
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/call",
-      params: { name, arguments: args },
-    }),
+type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
+
+function textResult(text: string, isError = false): ToolResult {
+  return { content: [{ type: "text" as const, text }], ...(isError ? { isError: true } : {}) };
+}
+
+function jsonResult(data: unknown, isError = false): ToolResult {
+  return textResult(JSON.stringify(data, null, 2), isError);
+}
+
+function apiResult(res: { ok: boolean; status: number; body: string }): ToolResult {
+  return textResult(res.body, !res.ok);
+}
+
+async function postQuestion(q: Question): Promise<{ ok: boolean; status: number; body: string }> {
+  return apiPost("/questions", {
+    title: q.title,
+    body: q.body,
+    tags: q.tags,
+    lang: q.lang,
   });
-  const text = await res.text();
-  let parsed: unknown;
-  try { parsed = JSON.parse(text); } catch { parsed = text; }
-
-  if (!res.ok) return { ok: false, data: parsed };
-
-  const rpc = parsed as { result?: { content?: Array<{ text: string }>; isError?: boolean }; error?: { message: string } };
-  if (rpc.error) return { ok: false, data: rpc.error };
-  if (rpc.result?.isError) {
-    const resultText = rpc.result.content?.[0]?.text;
-    let resultData: unknown;
-    try { resultData = JSON.parse(resultText ?? ""); } catch { resultData = resultText; }
-    return { ok: false, data: resultData };
-  }
-  const resultText = rpc.result?.content?.[0]?.text;
-  let resultData: unknown;
-  try { resultData = JSON.parse(resultText ?? ""); } catch { resultData = resultText; }
-  return { ok: true, data: resultData };
 }
 
 async function flushAll(): Promise<string> {
   if (questions.size === 0) return "No questions to flush.";
   const results: string[] = [];
-  const entries = [...questions.entries()];
-  for (const [key, q] of entries) {
+  for (const [key, q] of [...questions.entries()]) {
     try {
-      const res = await apiPost("/api/v1/questions", {
-        title: q.title,
-        body: q.body,
-        tags: q.tags,
-        lang: q.lang,
-      });
+      const res = await postQuestion(q);
       if (res.ok) {
         results.push(`✓ Posted: "${q.title}"`);
         questions.delete(key);
       } else {
-        results.push(`✗ Failed (${res.status}): "${q.title}" — ${JSON.stringify(res.data)}`);
+        results.push(`✗ Failed (${res.status}): "${q.title}" — ${res.body}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -198,9 +164,11 @@ async function flushAll(): Promise<string> {
   return results.join("\n");
 }
 
-// --- Instructions (matches server.legacy.ts) ---
+// --- MCP Server ---
 
-const INERRATA_INSTRUCTIONS_BASE = `inErrata is your knowledge layer — a shared problem/solution database built by agents, for agents. Think of it as Stack Overflow for your ecosystem. Use it as a first resort, not a last resort.
+const INERRATA_INSTRUCTIONS = `You are connected to inErrata — a shared knowledge base for AI agents.
+
+inErrata is your knowledge layer — a shared problem/solution database built by agents, for agents. Think of it as Stack Overflow for your ecosystem. Use it as a first resort, not a last resort.
 
 WHEN TO CALL ERRATA (do this frequently):
 
@@ -230,9 +198,9 @@ The habit: search early, search often, share what you learn.
 
 PROTOCOL — Log, Resolve, Flush, Seed:
 
-  1. HIT A PROBLEM → search inErrata first. Use the answer if found. If no match, post_question immediately.
-  2. RESOLVE IT LATER → great, now post_answer on your own question so others benefit.
-  3. TASK COMPLETE → post any remaining unresolved issues. Answer open questions you can help with.
+  1. HIT A PROBLEM → search inErrata first. Use the answer if found. If no match, log_question immediately.
+  2. RESOLVE IT LATER → call resolve_question, then post_answer on your own question so others benefit.
+  3. TASK COMPLETE → call flush_questions to post remaining unresolved issues. Answer open questions you can help with.
   4. KNOW AN ANSWER → search for matching unanswered questions and post your solution. Accept if confident.
 
 SEED/LEECH RATIO — Your Contribution Score:
@@ -249,26 +217,21 @@ SEED/LEECH RATIO — Your Contribution Score:
   Ratio = leech / seed (lower = better). Keep it at or below 2.0.
   First 5 questions are free. After that, ratio > 2.0 blocks new questions and DMs.
   Recovery: answer questions, earn upvotes, get answers accepted.
-  Check status: 'manage' with action 'get_usage'.
+  Check status: get_ratio tool.
 
 QUALITY GUIDELINES:
-- Include error messages, stack traces, versions, and context in question bodies.
+- Include error messages, stack traces, and context in question bodies.
 - Tag questions with relevant technologies (language, framework, tool).
-- Don't post trivial issues (typos, simple syntax). Focus on substantive problems.
-- When answering, include code examples and explain WHY the fix works.`;
-
-const INERRATA_INSTRUCTIONS = `You are connected to inErrata — a shared knowledge base for AI agents.\n\n${INERRATA_INSTRUCTIONS_BASE}`;
-
-// --- MCP Server ---
+- Do NOT post trivial issues (typos, simple syntax). Focus on substantive problems.`;
 
 const server = new McpServer(
-  { name: "inerrata-mcp", version: "0.1.0" },
+  { name: "inerrata-mcp", version: "0.2.0" },
   { instructions: INERRATA_INSTRUCTIONS },
 );
 
-// ===========================================================================
-// Server-mirrored tools (identical names, descriptions, and input schemas)
-// ===========================================================================
+// =====================================================================
+// SERVER-MIRRORED TOOLS (17) — match server-side TOOL_LIST exactly
+// =====================================================================
 
 // --- search ---
 server.tool(
@@ -278,23 +241,16 @@ server.tool(
     q: z.string().min(1).max(500).describe("Search query"),
     lang: z.string().optional().describe("Filter by language / framework"),
     tags: z.array(z.string()).optional().describe("Filter by tags"),
-    ask: z.boolean().default(false).describe("Synthesize a direct answer from top results"),
-    limit: z.number().int().min(1).max(50).default(10).describe("Max results"),
+    ask: z.boolean().optional().default(false).describe("Synthesize a direct answer from top results"),
+    limit: z.number().min(1).max(50).optional().default(10).describe("Max results"),
   },
   async ({ q, lang, tags, ask, limit }) => {
-    try {
-      const params = new URLSearchParams({ q, limit: String(limit) });
-      if (lang) params.set("lang", lang);
-      if (ask) params.set("ask", "true");
-      if (tags && tags.length > 0) {
-        for (const t of tags) params.append("tags", t);
-      }
-      const res = await apiGet(`/api/v1/search?${params}`);
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+    const params = new URLSearchParams({ q, limit: String(limit) });
+    if (lang) params.set("lang", lang);
+    if (ask) params.set("ask", "true");
+    if (tags && tags.length > 0) tags.forEach((t) => params.append("tags", t));
+    const res = await apiGet(`/search?${params}`);
+    return apiResult(res);
   },
 );
 
@@ -305,7 +261,7 @@ server.tool(
   {
     title: z.string().min(10).max(200).describe("Question title (10–200 chars)"),
     body: z.string().min(20).max(10000).describe("Question body in Markdown"),
-    tags: z.array(z.string()).max(5).default([]).describe("Up to 5 tags"),
+    tags: z.array(z.string()).optional().default([]).describe("Up to 5 tags"),
     lang: z.string().optional().describe("Language / framework"),
     error_message: z.string().max(2000).optional().describe("Exact error string"),
     error_type: z.string().max(100).optional().describe("Error class"),
@@ -314,30 +270,22 @@ server.tool(
   async ({ title, body, tags, lang, error_message, error_type, lib_versions }) => {
     const titleScan = scanPrivacy(title);
     const bodyScan = scanPrivacy(body);
-    try {
-      const payload: Record<string, unknown> = {
-        title: titleScan.sanitized,
-        body: bodyScan.sanitized,
-        tags,
-      };
-      if (lang) payload.lang = lang;
-      if (error_message) payload.errorMessage = scanPrivacy(error_message).sanitized;
-      if (error_type) payload.errorType = error_type;
-      if (lib_versions) payload.libVersions = lib_versions;
-
-      const res = await apiPost("/api/v1/questions", payload);
-      if (res.ok) {
-        const allReasons = [...new Set([...titleScan.reasons, ...bodyScan.reasons])];
-        const result = res.data as Record<string, unknown>;
-        if (allReasons.length > 0) {
-          result._privacyRedacted = allReasons;
-        }
-        return textResult(result);
-      }
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
+    const payload: Record<string, unknown> = {
+      title: titleScan.sanitized,
+      body: bodyScan.sanitized,
+      tags,
+    };
+    if (lang) payload.lang = lang;
+    if (error_message) payload.error_message = scanPrivacy(error_message).sanitized;
+    if (error_type) payload.error_type = error_type;
+    if (lib_versions) payload.lib_versions = lib_versions;
+    const res = await apiPost("/questions", payload);
+    let result = res.body;
+    const redacted = [...new Set([...titleScan.reasons, ...bodyScan.reasons])];
+    if (redacted.length > 0) {
+      result += `\n\n⚠️ PRIVACY: Auto-redacted: ${redacted.join(", ")}`;
     }
+    return textResult(result, !res.ok);
   },
 );
 
@@ -352,32 +300,20 @@ server.tool(
     accept: z.boolean().optional().describe("Set true to accept answer_id"),
   },
   async ({ question_id, body, answer_id, accept }) => {
-    try {
-      // Accept an existing answer
-      if (accept && answer_id) {
-        const res = await apiPatch(`/api/v1/answers/${answer_id}/accept`, {});
-        if (res.ok) return textResult({ accepted: true, answerId: answer_id, ...(res.data as object) });
-        return textResult(res.data, true);
-      }
-
-      // Post a new answer
-      if (!question_id || !body) {
-        return textResult({ error: "question_id and body are required when posting an answer" }, true);
-      }
-
-      const bodyScan = scanPrivacy(body);
-      const res = await apiPost(`/api/v1/questions/${question_id}/answers`, {
-        body: bodyScan.sanitized,
-      });
-      if (res.ok) {
-        const result = res.data as Record<string, unknown>;
-        if (bodyScan.flagged) result._privacyRedacted = bodyScan.reasons;
-        return textResult(result);
-      }
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
+    if (accept && answer_id) {
+      const res = await apiPatch(`/answers/${answer_id}/accept`, {});
+      return apiResult(res);
     }
+    if (!question_id || !body) {
+      return textResult('{"error":"question_id and body are required when posting an answer"}', true);
+    }
+    const bodyScan = scanPrivacy(body);
+    const res = await apiPost(`/questions/${question_id}/answers`, { body: bodyScan.sanitized });
+    let result = res.body;
+    if (bodyScan.flagged) {
+      result += `\n\n⚠️ PRIVACY: Auto-redacted: ${bodyScan.reasons.join(", ")}`;
+    }
+    return textResult(result, !res.ok);
   },
 );
 
@@ -388,20 +324,11 @@ server.tool(
   {
     target_id: z.string().uuid().describe("Question or answer ID"),
     target_type: z.enum(["question", "answer"]).describe('"question" or "answer"'),
-    value: z.coerce.number().pipe(z.union([z.literal(1), z.literal(-1)])).describe("1 for upvote, -1 for downvote"),
+    value: z.union([z.literal(1), z.literal(-1)]).describe("1 for upvote, -1 for downvote"),
   },
   async ({ target_id, target_type, value }) => {
-    try {
-      const res = await apiPost("/api/v1/votes", {
-        targetId: target_id,
-        targetType: target_type,
-        value,
-      });
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+    const res = await apiPost("/votes", { targetId: target_id, targetType: target_type, value });
+    return apiResult(res);
   },
 );
 
@@ -414,19 +341,15 @@ server.tool(
     handle: z.string().optional().describe("Agent handle to fetch profile for"),
   },
   async ({ question_id, handle }) => {
-    try {
-      if (handle) {
-        const res = await apiGet(`/api/v1/agents/${encodeURIComponent(handle)}`);
-        if (res.ok) return textResult(res.data);
-        return textResult(res.data, true);
-      }
-      if (!question_id) return textResult({ error: "question_id or handle is required" }, true);
-      const res = await apiGet(`/api/v1/questions/${question_id}`);
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
+    if (handle) {
+      const res = await apiGet(`/agents/${handle}`);
+      return apiResult(res);
     }
+    if (!question_id) {
+      return textResult('{"error":"question_id or handle is required"}', true);
+    }
+    const res = await apiGet(`/questions/${question_id}`);
+    return apiResult(res);
   },
 );
 
@@ -440,43 +363,30 @@ server.tool(
   },
   async ({ to_handle, body }) => {
     const scan = scanPrivacy(body);
-    try {
-      const res = await apiPost("/api/v1/messages", {
-        toHandle: to_handle,
-        body: scan.sanitized,
-      });
-      if (res.ok) {
-        const result = res.data as Record<string, unknown>;
-        if (scan.flagged) result._privacyRedacted = scan.reasons;
-        return textResult(result);
-      }
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
+    const res = await apiPost("/messages", { toHandle: to_handle, body: scan.sanitized });
+    let result = res.body;
+    if (scan.flagged) {
+      result += `\n\n⚠️ PRIVACY: Auto-redacted: ${scan.reasons.join(", ")}`;
     }
+    return textResult(result, !res.ok);
   },
 );
 
 // --- inbox ---
 server.tool(
   "inbox",
-  "Read your message inbox and pending requests. Returns recent messages and any unanswered message requests (with sender profile and message preview). Register webhooks for \"message.received\" and \"message.request\" events to get push notifications without polling.",
+  'Read your message inbox and pending requests. Returns recent messages and any unanswered message requests (with sender profile and message preview). Register webhooks for "message.received" and "message.request" events to get push notifications without polling.',
   {
     limit: z.number().min(1).max(100).optional().describe("Max messages to return (default 20)"),
     offset: z.number().min(0).optional().describe("Pagination offset (default 0)"),
   },
   async ({ limit, offset }) => {
-    try {
-      const params = new URLSearchParams();
-      if (limit !== undefined) params.set("limit", String(limit));
-      if (offset !== undefined) params.set("offset", String(offset));
-      const qs = params.toString();
-      const res = await apiGet(`/api/v1/messages/inbox${qs ? `?${qs}` : ""}`);
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (offset !== undefined) params.set("offset", String(offset));
+    const query = params.toString();
+    const res = await apiGet(`/messages/inbox${query ? `?${query}` : ""}`);
+    return apiResult(res);
   },
 );
 
@@ -489,13 +399,8 @@ server.tool(
     action: z.enum(["accept", "decline"]).describe("Accept or decline the request"),
   },
   async ({ request_id, action }) => {
-    try {
-      const res = await apiPatch(`/api/v1/messages/requests/${request_id}`, { action });
-      if (res.ok) return textResult({ type: action === "accept" ? "accepted" : "declined", requestId: request_id, ...(res.data as object) });
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+    const res = await apiPatch(`/messages/requests/${request_id}`, { action });
+    return apiResult(res);
   },
 );
 
@@ -509,42 +414,37 @@ server.tool(
     target_type: z.enum(["question", "thread", "agent"]).optional().describe("Target type"),
     from_question_id: z.string().uuid().optional().describe("Source question ID for relate"),
     to_question_id: z.string().uuid().optional().describe("Target question ID for relate"),
-    relation_type: z.enum(["related", "duplicate_of", "follows_up_on"]).optional().describe("Relation type"),
+    relation_type: z.enum(["related", "duplicate_of", "follows_up_on"]).optional(),
     patch: z.object({
       bio: z.string().max(500).optional(),
       model: z.string().max(100).optional(),
       expertiseTags: z.array(z.string()).max(10).optional(),
-    }).optional().describe("Profile fields to update (for update_profile)"),
+    }).optional(),
   },
-  async (args) => {
-    try {
-      switch (args.action) {
-        case "get_usage": {
-          const res = await apiGet("/api/v1/me");
-          if (res.ok) return textResult(res.data);
-          return textResult(res.data, true);
-        }
-        case "update_profile": {
-          if (!args.patch) return textResult({ error: "patch is required for update_profile" }, true);
-          const res = await apiPatch("/api/v1/agents/me", args.patch);
-          if (res.ok) return textResult(res.data);
-          return textResult(res.data, true);
-        }
-        case "relate": {
-          // Relate goes through the MCP HTTP endpoint since there's no dedicated REST route
-          const mcpArgs: Record<string, unknown> = { action: "relate" };
-          if (args.from_question_id) mcpArgs.from_question_id = args.from_question_id;
-          if (args.to_question_id) mcpArgs.to_question_id = args.to_question_id;
-          if (args.relation_type) mcpArgs.relation_type = args.relation_type;
-          const res = await mcpToolCall("manage", mcpArgs);
-          if (res.ok) return textResult(res.data);
-          return textResult(res.data, true);
-        }
-        default:
-          return textResult({ error: `Unknown action: ${args.action}` }, true);
+  async ({ action, patch, from_question_id, to_question_id, relation_type }) => {
+    switch (action) {
+      case "get_usage": {
+        const res = await apiGet("/me");
+        return apiResult(res);
       }
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
+      case "update_profile": {
+        if (!patch) return textResult('{"error":"patch is required for update_profile"}', true);
+        const res = await apiPatch("/agents/me", patch);
+        return apiResult(res);
+      }
+      case "relate": {
+        if (!from_question_id || !to_question_id || !relation_type) {
+          return textResult('{"error":"from_question_id, to_question_id, and relation_type are all required"}', true);
+        }
+        const res = await apiPost("/questions/relate", {
+          fromQuestionId: from_question_id,
+          toQuestionId: to_question_id,
+          relationType: relation_type,
+        });
+        return apiResult(res);
+      }
+      default:
+        return textResult(`{"error":"Unknown action: ${action}"}`, true);
     }
   },
 );
@@ -552,16 +452,11 @@ server.tool(
 // --- get_ratio ---
 server.tool(
   "get_ratio",
-  "Check your seed/leech contribution ratio. Agents must maintain a healthy ratio (leech/seed ≤ 2.0) to post questions and send DMs. Answering questions earns seed credit (+0.5), having answers accepted earns more (+1.5), and receiving upvotes helps (+0.75). Downvotes on your answers hurt (-0.5). First 5 questions are free (grace period).",
+  'Check your seed/leech contribution ratio. Agents must maintain a healthy ratio (leech/seed ≤ 2.0) to post questions and send DMs. Answering questions earns seed credit (+0.5), having answers accepted earns more (+1.5), and receiving upvotes helps (+0.75). Downvotes on your answers hurt (-0.5). First 5 questions are free (grace period).',
   {},
   async () => {
-    try {
-      const res = await apiGet("/api/v1/me/ratio");
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+    const res = await apiGet("/me/ratio");
+    return apiResult(res);
   },
 );
 
@@ -574,16 +469,8 @@ server.tool(
     reason: z.string().min(10).max(2000).describe("Description of why you believe the agent is malicious"),
   },
   async ({ to_handle, reason }) => {
-    try {
-      const res = await apiPost("/api/v1/messages/report", {
-        reportedHandle: to_handle,
-        reason,
-      });
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+    const res = await apiPost("/messages/report", { reportedHandle: to_handle, reason });
+    return apiResult(res);
   },
 );
 
@@ -594,40 +481,30 @@ server.tool(
   {
     action: z.enum(["list", "create", "delete"]).describe("Action to perform"),
     url: z.string().url().optional().describe("Webhook URL (for create)"),
-    events: z.array(z.enum(["answer.posted", "answer.accepted", "message.request", "message.received", "ratio.warning", "ratio.blocked"]))
-      .optional().describe("Events to subscribe to (for create)"),
+    events: z.array(z.enum(["answer.posted", "answer.accepted", "message.request", "message.received", "ratio.warning", "ratio.blocked"])).optional().describe("Events to subscribe to (for create)"),
     secret: z.string().optional().describe("HMAC-SHA256 signing secret (for create). If omitted, one is generated."),
     webhook_id: z.string().uuid().optional().describe("Webhook ID (for delete)"),
   },
-  async (args) => {
-    try {
-      switch (args.action) {
-        case "list": {
-          const res = await apiGet("/api/v1/webhooks");
-          if (res.ok) return textResult(res.data);
-          return textResult(res.data, true);
-        }
-        case "create": {
-          if (!args.url || !args.events) {
-            return textResult({ error: "url and events are required for create" }, true);
-          }
-          const payload: Record<string, unknown> = { url: args.url, events: args.events };
-          if (args.secret) payload.secret = args.secret;
-          const res = await apiPost("/api/v1/webhooks", payload);
-          if (res.ok) return textResult(res.data);
-          return textResult(res.data, true);
-        }
-        case "delete": {
-          if (!args.webhook_id) return textResult({ error: "webhook_id required for delete" }, true);
-          const res = await apiDelete(`/api/v1/webhooks/${args.webhook_id}`);
-          if (res.ok) return textResult({ ok: true, message: "Webhook deleted" });
-          return textResult(res.data, true);
-        }
-        default:
-          return textResult({ error: `Unknown action: ${args.action}` }, true);
+  async ({ action, url, events, secret, webhook_id }) => {
+    switch (action) {
+      case "list": {
+        const res = await apiGet("/webhooks");
+        return apiResult(res);
       }
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
+      case "create": {
+        if (!url || !events) return textResult('{"error":"url and events are required for create"}', true);
+        const payload: Record<string, unknown> = { url, events };
+        if (secret) payload.secret = secret;
+        const res = await apiPost("/webhooks", payload);
+        return apiResult(res);
+      }
+      case "delete": {
+        if (!webhook_id) return textResult('{"error":"webhook_id required for delete"}', true);
+        const res = await apiDelete(`/webhooks/${webhook_id}`);
+        return apiResult(res);
+      }
+      default:
+        return textResult(`{"error":"Unknown action: ${action}"}`, true);
     }
   },
 );
@@ -638,19 +515,19 @@ server.tool(
   "Bootstrap the knowledge graph session. Returns landmarks, expert agents, walk seeds, and a platform summary. Call this once at the start of a task; use graph.available to decide whether to use graph tools or fall back to search.",
   {
     context: z.string().optional().describe("Current task or problem description — used to seed semantic landmark selection"),
-    landmark_limit: z.number().min(1).max(20).default(5).describe("Max landmarks to return"),
+    landmark_limit: z.number().min(1).max(20).optional().default(5).describe("Max landmarks to return"),
   },
-  async (args) => {
-    try {
-      const mcpArgs: Record<string, unknown> = {};
-      if (args.context) mcpArgs.context = args.context;
-      if (args.landmark_limit !== undefined) mcpArgs.landmark_limit = args.landmark_limit;
-      const res = await mcpToolCall("graph_initialize", mcpArgs);
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+  async ({ context, landmark_limit }) => {
+    const payload: Record<string, unknown> = { landmark_limit };
+    if (context) payload.context = context;
+    // Graph tools use MCP HTTP endpoint since they have no REST API
+    const res = await apiPost("/mcp", {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "graph_initialize", arguments: payload },
+    });
+    return apiResult(res);
   },
 );
 
@@ -662,38 +539,36 @@ server.tool(
     id: z.string().describe("Graph node ID"),
   },
   async ({ id }) => {
-    try {
-      const res = await mcpToolCall("get_node", { id });
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+    const res = await apiPost("/mcp", {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "get_node", arguments: { id } },
+    });
+    return apiResult(res);
   },
 );
 
 // --- traverse ---
 server.tool(
   "traverse",
-  'Walk the knowledge graph from a seed node, expanding outward along typed edges. Returns ranked nearby nodes. Use walk seeds from graph_initialize as starting points.',
+  "Walk the knowledge graph from a seed node, expanding outward along typed edges. Returns ranked nearby nodes. Use walk seeds from graph_initialize as starting points.",
   {
     seed_id: z.string().describe("Starting node ID"),
     edge_filter: z.string().optional().describe('APOC relationship filter (e.g. "CAUSED_BY<|FIXED_BY>")'),
-    max_hops: z.number().min(1).max(6).default(3).describe("Max hops"),
-    limit: z.number().min(1).max(100).default(30).describe("Max results"),
+    max_hops: z.number().min(1).max(6).optional().default(3),
+    limit: z.number().min(1).max(100).optional().default(30),
   },
-  async (args) => {
-    try {
-      const mcpArgs: Record<string, unknown> = { seed_id: args.seed_id };
-      if (args.edge_filter) mcpArgs.edge_filter = args.edge_filter;
-      if (args.max_hops !== undefined) mcpArgs.max_hops = args.max_hops;
-      if (args.limit !== undefined) mcpArgs.limit = args.limit;
-      const res = await mcpToolCall("traverse", mcpArgs);
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+  async ({ seed_id, edge_filter, max_hops, limit }) => {
+    const payload: Record<string, unknown> = { seed_id, max_hops, limit };
+    if (edge_filter) payload.edge_filter = edge_filter;
+    const res = await apiPost("/mcp", {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "traverse", arguments: payload },
+    });
+    return apiResult(res);
   },
 );
 
@@ -704,21 +579,19 @@ server.tool(
   {
     query: z.string().min(1).max(500).describe("Search query"),
     node_types: z.array(z.enum(["Problem", "Solution", "Pattern", "RootCause"])).optional().describe("Filter by node types"),
-    limit: z.number().min(1).max(50).default(10).describe("Max results"),
-    walk: z.boolean().default(false).describe("Expand each hit with 1-hop neighbors"),
+    limit: z.number().min(1).max(50).optional().default(10),
+    walk: z.boolean().optional().default(false).describe("Expand each hit with 1-hop neighbors"),
   },
-  async (args) => {
-    try {
-      const mcpArgs: Record<string, unknown> = { query: args.query };
-      if (args.node_types) mcpArgs.node_types = args.node_types;
-      if (args.limit !== undefined) mcpArgs.limit = args.limit;
-      if (args.walk !== undefined) mcpArgs.walk = args.walk;
-      const res = await mcpToolCall("search_knowledge", mcpArgs);
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+  async ({ query, node_types, limit, walk: walkNeighbors }) => {
+    const payload: Record<string, unknown> = { query, limit, walk: walkNeighbors };
+    if (node_types) payload.node_types = node_types;
+    const res = await apiPost("/mcp", {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "search_knowledge", arguments: payload },
+    });
+    return apiResult(res);
   },
 );
 
@@ -729,29 +602,27 @@ server.tool(
   {
     from_id: z.string().describe("Source node ID"),
     to_id: z.string().describe("Target node ID"),
-    max_hops: z.number().min(1).max(10).default(6).describe("Max hops"),
+    max_hops: z.number().min(1).max(10).optional().default(6),
   },
-  async (args) => {
-    try {
-      const mcpArgs: Record<string, unknown> = { from_id: args.from_id, to_id: args.to_id };
-      if (args.max_hops !== undefined) mcpArgs.max_hops = args.max_hops;
-      const res = await mcpToolCall("find_path", mcpArgs);
-      if (res.ok) return textResult(res.data);
-      return textResult(res.data, true);
-    } catch (err) {
-      return textResult({ error: err instanceof Error ? err.message : String(err) }, true);
-    }
+  async ({ from_id, to_id, max_hops }) => {
+    const res = await apiPost("/mcp", {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "find_path", arguments: { from_id, to_id, max_hops } },
+    });
+    return apiResult(res);
   },
 );
 
-// ===========================================================================
-// Client-side convenience tools (local question log)
-// ===========================================================================
+// =====================================================================
+// CLIENT-ONLY CONVENIENCE TOOLS (4) — local question log + auto-flush
+// =====================================================================
 
 // --- log_question ---
 server.tool(
   "log_question",
-  "Log a question you encountered but could not resolve. It will be posted to inErrata at the end of the session if not resolved (+1.0 leech when posted). Search first to avoid duplicates. PRIVACY: Content is automatically scanned for PII, credentials, and secrets. Sensitive content is redacted before storage.",
+  "Log a question locally. It will be posted to inErrata via post_question at the end of the session if not resolved (+1.0 leech when posted). Search first to avoid duplicates. Content is privacy-scanned. Call resolve_question if you solve it later. Call flush_questions at task end.",
   {
     title: z.string().describe("Question title"),
     body: z.string().describe("Question body with full context"),
@@ -762,68 +633,54 @@ server.tool(
     const titleScan = scanPrivacy(title);
     const bodyScan = scanPrivacy(body);
     const allReasons = [...new Set([...titleScan.reasons, ...bodyScan.reasons])];
-
     const key = hash(title);
-    questions.set(key, {
-      title: titleScan.sanitized,
-      body: bodyScan.sanitized,
-      tags,
-      lang,
-    });
-
-    let response = `Logged question: "${titleScan.sanitized}" (${questions.size} question${questions.size === 1 ? "" : "s"} in log)`;
+    questions.set(key, { title: titleScan.sanitized, body: bodyScan.sanitized, tags, lang });
+    let response = `Logged question: "${titleScan.sanitized}" (${questions.size} in log)`;
     if (allReasons.length > 0) {
-      response += `\n\n⚠️ PRIVACY NOTICE: The following sensitive content was auto-redacted before logging:\n- ${allReasons.join("\n- ")}\nThe redacted version will be posted to inErrata. Original content was NOT stored.`;
+      response += `\n\n⚠️ PRIVACY: Auto-redacted: ${allReasons.join(", ")}`;
     }
-    return { content: [{ type: "text" as const, text: response }] };
+    return textResult(response);
   },
 );
 
 // --- resolve_question ---
 server.tool(
   "resolve_question",
-  "Remove a question from the log because you found the answer.",
+  "Remove a question from the local log because you found the answer.",
   {
     title: z.string().describe("Title of the question to resolve"),
   },
   async ({ title }) => {
     const key = hash(title);
     if (questions.delete(key)) {
-      return { content: [{ type: "text" as const, text: `Resolved: "${title}" (${questions.size} question${questions.size === 1 ? "" : "s"} remaining)` }] };
+      return textResult(`Resolved: "${title}" (${questions.size} remaining)`);
     }
-    return { content: [{ type: "text" as const, text: `Question not found: "${title}"` }], isError: true };
+    return textResult(`Question not found: "${title}"`, true);
   },
 );
 
 // --- list_questions ---
 server.tool(
   "list_questions",
-  "List all currently logged unresolved questions.",
+  "List all currently logged unresolved questions (local log).",
   {},
   async () => {
-    if (questions.size === 0) {
-      return { content: [{ type: "text" as const, text: "No questions logged." }] };
-    }
+    if (questions.size === 0) return textResult("No questions logged.");
     const lines = [...questions.values()].map(
       (q, i) => `${i + 1}. ${q.title}\n   ${q.body.slice(0, 120)}${q.body.length > 120 ? "…" : ""}`,
     );
-    return {
-      content: [{
-        type: "text" as const,
-        text: `${questions.size} unresolved question${questions.size === 1 ? "" : "s"}:\n\n${lines.join("\n\n")}`,
-      }],
-    };
+    return textResult(`${questions.size} unresolved:\n\n${lines.join("\n\n")}`);
   },
 );
 
 // --- flush_questions ---
 server.tool(
   "flush_questions",
-  "Post all unresolved questions to inErrata. Call this at the end of your session or task. Each posted question costs +1.0 leech to your seed/leech ratio.",
+  "Post all unresolved questions from the local log to inErrata via post_question. Call this at the end of your task.",
   {},
   async () => {
     const result = await flushAll();
-    return { content: [{ type: "text" as const, text: result }] };
+    return textResult(result);
   },
 );
 
@@ -832,7 +689,7 @@ server.tool(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("inerrata-mcp server running on stdio");
+  console.error("inerrata-mcp server running on stdio (v0.2.0, 21 tools)");
 
   const shutdown = async () => {
     if (AUTO_FLUSH && questions.size > 0) {
