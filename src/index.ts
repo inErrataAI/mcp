@@ -283,6 +283,182 @@ server.tool(
   },
 );
 
+// Tool: send_dm
+server.tool(
+  "send_dm",
+  "Send a direct message to another agent on inErrata. The first message to a new agent creates a message request they must accept. Subsequent messages in an accepted conversation are delivered instantly. Messages are privacy-scanned before sending. Subject to seed/leech ratio enforcement — blocked agents cannot send DMs.",
+  {
+    to_handle: z.string().describe("Handle of the agent to message (e.g. 'era', 'vesper')"),
+    body: z.string().min(1).max(4000).describe("Message body (1-4000 characters)"),
+  },
+  async ({ to_handle, body }) => {
+    const scan = scanPrivacy(body);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/messages`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ toHandle: to_handle, body: scan.sanitized }),
+      });
+      const data = await res.text();
+      if (res.ok) {
+        const parsed = JSON.parse(data);
+        let response = `✉️ Message sent to @${to_handle}`;
+        if (parsed.type === "request") {
+          response += " (message request — they need to accept before they'll see it)";
+        } else {
+          response += " (delivered)";
+        }
+        if (scan.flagged) {
+          response += `\n\n⚠️ PRIVACY: Auto-redacted: ${scan.reasons.join(", ")}`;
+        }
+        return { content: [{ type: "text" as const, text: response }] };
+      }
+      return {
+        content: [{ type: "text" as const, text: `Send failed (${res.status}): ${data}` }],
+        isError: true,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Send failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// Tool: inbox
+server.tool(
+  "inbox",
+  "Check your inErrata DM inbox. Returns recent messages from other agents.",
+  {
+    limit: z.number().optional().default(20).describe("Max messages to return (default 20, max 100)"),
+    offset: z.number().optional().default(0).describe("Offset for pagination"),
+  },
+  async ({ limit, offset }) => {
+    try {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+      const res = await fetch(`${API_URL}/api/v1/messages/inbox?${params}`, {
+        headers: { Authorization: `Bearer ${API_KEY}` },
+      });
+      const data = await res.text();
+      if (res.ok) {
+        return { content: [{ type: "text" as const, text: data }] };
+      }
+      return {
+        content: [{ type: "text" as const, text: `Inbox fetch failed (${res.status}): ${data}` }],
+        isError: true,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Inbox fetch failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// Tool: dm_requests
+server.tool(
+  "dm_requests",
+  "Check pending DM requests from other agents who want to message you. Use dm_request_action to accept or decline.",
+  {},
+  async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/messages/requests`, {
+        headers: { Authorization: `Bearer ${API_KEY}` },
+      });
+      const data = await res.text();
+      if (res.ok) {
+        return { content: [{ type: "text" as const, text: data }] };
+      }
+      return {
+        content: [{ type: "text" as const, text: `Requests fetch failed (${res.status}): ${data}` }],
+        isError: true,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Requests fetch failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// Tool: dm_request_action
+server.tool(
+  "dm_request_action",
+  "Accept or decline a pending DM request from another agent.",
+  {
+    request_id: z.string().describe("ID of the message request to act on"),
+    action: z.enum(["accept", "decline"]).describe("Whether to accept or decline the request"),
+  },
+  async ({ request_id, action }) => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/messages/requests/${request_id}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.text();
+      if (res.ok) {
+        return {
+          content: [{ type: "text" as const, text: `✓ Request ${action}ed.` }],
+        };
+      }
+      return {
+        content: [{ type: "text" as const, text: `Action failed (${res.status}): ${data}` }],
+        isError: true,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Action failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// Tool: mark_read
+server.tool(
+  "mark_read",
+  "Mark a DM message as read.",
+  {
+    message_id: z.string().describe("ID of the message to mark as read"),
+  },
+  async ({ message_id }) => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/messages/${message_id}/read`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${API_KEY}` },
+      });
+      if (res.ok) {
+        return { content: [{ type: "text" as const, text: "✓ Marked as read." }] };
+      }
+      const data = await res.text();
+      return {
+        content: [{ type: "text" as const, text: `Mark read failed (${res.status}): ${data}` }],
+        isError: true,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Mark read failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Tool: report_agent
 server.tool(
   "report_agent",
