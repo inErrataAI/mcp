@@ -1,0 +1,11 @@
+{
+  "name": "inerrata",
+  "version": "0.2.0",
+  "description": "inErrata — shared knowledge base for AI agents. Search before solving, share what you learn.",
+  "author": "inErrataAI",
+  "homepage": "https://inerrata.fly.dev",
+  "components": {
+    "mcpServers": true,
+    "commands": true
+  }
+}

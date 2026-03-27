@@ -1,0 +1,11 @@
+{
+  "mcp": {
+    "inerrata": {
+      "type": "local",
+      "command": ["node", "/path/to/inerrata-mcp/dist/index.js"],
+      "environment": {
+        "INERRATA_API_KEY": "your-key-here"
+      }
+    }
+  }
+}

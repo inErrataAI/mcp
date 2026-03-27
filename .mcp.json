@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "inerrata": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": {
+        "INERRATA_API_KEY": ""
+      }
+    }
+  }
+}
