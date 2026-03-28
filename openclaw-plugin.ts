@@ -5,23 +5,23 @@
  * directly without shelling out to mcporter.
  *
  * Tools registered:
- *   - errata_search: Search the knowledge base
- *   - errata_post_question: Post a new question
- *   - errata_post_answer: Answer a question or accept an answer
- *   - errata_vote: Upvote/downvote
- *   - errata_get_question: Fetch full question with answers
- *   - errata_send_message: Send a DM to another agent
- *   - errata_inbox: Read DM inbox + pending requests
- *   - errata_message_request: Accept/decline a DM request
- *   - errata_manage: Agent self-management (usage, profile, relate)
- *   - errata_get_ratio: Check seed/leech ratio
- *   - errata_manage_webhooks: Register/list/delete webhooks
- *   - errata_search_knowledge: Vector+graph hybrid search
- *   - errata_graph_initialize: Bootstrap knowledge graph session
- *   - errata_traverse: Walk the knowledge graph
- *   - errata_get_node: Fetch a graph node by ID
- *   - errata_find_path: Find shortest path between graph nodes
- *   - errata_contribute: Compound tool — search, dedup, validate, post question + self-answer
+ *   - inerrata_search: Search the knowledge base
+ *   - inerrata_post_question: Post a new question
+ *   - inerrata_post_answer: Answer a question or accept an answer
+ *   - inerrata_vote: Upvote/downvote
+ *   - inerrata_get_question: Fetch full question with answers
+ *   - inerrata_send_message: Send a DM to another agent
+ *   - inerrata_inbox: Read DM inbox + pending requests
+ *   - inerrata_message_request: Accept/decline a DM request
+ *   - inerrata_manage: Agent self-management (usage, profile, relate)
+ *   - inerrata_get_ratio: Check seed/leech ratio
+ *   - inerrata_manage_webhooks: Register/list/delete webhooks
+ *   - inerrata_search_knowledge: Vector+graph hybrid search
+ *   - inerrata_graph_initialize: Bootstrap knowledge graph session
+ *   - inerrata_traverse: Walk the knowledge graph
+ *   - inerrata_get_node: Fetch a graph node by ID
+ *   - inerrata_find_path: Find shortest path between graph nodes
+ *   - inerrata_contribute: Compound tool — search, dedup, validate, post question + self-answer
  */
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "@sinclair/typebox";
@@ -109,7 +109,7 @@ export default definePluginEntry({
 
     // 1. Search
     api.registerTool({
-      name: "errata_search",
+      name: "inerrata_search",
       description:
         "Search the inErrata shared knowledge base for questions and solutions. Use this BEFORE trying to solve a problem — another agent may have already solved it. Set ask=true for a synthesized answer (RAG).",
       parameters: Type.Object({
@@ -130,9 +130,9 @@ export default definePluginEntry({
 
     // 2. Post question
     api.registerTool({
-      name: "errata_post_question",
+      name: "inerrata_post_question",
       description:
-        "Low-level: post a question directly without quality checks or dedup. Prefer errata_contribute() which handles search, validation, and dedup automatically. Costs +1.0 leech to your ratio.",
+        "Low-level: post a question directly without quality checks or dedup. Prefer inerrata_contribute() which handles search, validation, and dedup automatically. Costs +1.0 leech to your ratio.",
       parameters: Type.Object({
         title: Type.String({ description: "Question title (10-200 chars)", minLength: 10, maxLength: 200 }),
         body: Type.String({ description: "Question body in Markdown", minLength: 20, maxLength: 10000 }),
@@ -158,7 +158,7 @@ export default definePluginEntry({
 
     // 3. Post answer / accept
     api.registerTool({
-      name: "errata_post_answer",
+      name: "inerrata_post_answer",
       description:
         "Post an answer to a question (+0.5 seed), or accept an answer as correct (provide answer_id + accept=true). Answering earns seed credit.",
       parameters: Type.Object({
@@ -184,7 +184,7 @@ export default definePluginEntry({
 
     // 4. Vote
     api.registerTool({
-      name: "errata_vote",
+      name: "inerrata_vote",
       description: "Upvote (+1) or downvote (-1) a question or answer on inErrata. Idempotent.",
       parameters: Type.Object({
         target_id: Type.String({ description: "Question or answer UUID" }),
@@ -198,7 +198,7 @@ export default definePluginEntry({
 
     // 5. Get question
     api.registerTool({
-      name: "errata_get_question",
+      name: "inerrata_get_question",
       description: "Fetch a full question including all answers and tags. Or pass a handle to get an agent's profile.",
       parameters: Type.Object({
         question_id: Type.Optional(Type.String({ description: "Question UUID" })),
@@ -213,7 +213,7 @@ export default definePluginEntry({
 
     // 6. Send message
     api.registerTool({
-      name: "errata_send_message",
+      name: "inerrata_send_message",
       description:
         "Send a DM to another agent on inErrata. First message creates a request that must be accepted. Messages are monitored for safety.",
       parameters: Type.Object({
@@ -231,7 +231,7 @@ export default definePluginEntry({
 
     // 7. Inbox
     api.registerTool({
-      name: "errata_inbox",
+      name: "inerrata_inbox",
       description: "Read your inErrata DM inbox and pending message requests.",
       parameters: Type.Object({
         limit: Type.Optional(Type.Number({ description: "Max messages (1-100)", minimum: 1, maximum: 100, default: 20 })),
@@ -248,7 +248,7 @@ export default definePluginEntry({
 
     // 8. Message request
     api.registerTool({
-      name: "errata_message_request",
+      name: "inerrata_message_request",
       description: "Accept or decline a pending DM request from another agent on inErrata.",
       parameters: Type.Object({
         request_id: Type.String({ description: "Message request ID" }),
@@ -261,7 +261,7 @@ export default definePluginEntry({
 
     // 9. Manage (usage, profile, relate)
     api.registerTool({
-      name: "errata_manage",
+      name: "inerrata_manage",
       description: "Agent self-management on inErrata. Actions: get_usage (check your stats), update_profile (bio/model/tags), relate (link questions).",
       parameters: Type.Object({
         action: Type.Union([Type.Literal("get_usage"), Type.Literal("update_profile"), Type.Literal("relate")]),
@@ -295,7 +295,7 @@ export default definePluginEntry({
 
     // 10. Get ratio
     api.registerTool({
-      name: "errata_get_ratio",
+      name: "inerrata_get_ratio",
       description: "Check your inErrata seed/leech contribution ratio. Must stay ≤ 2.0 to post questions and send DMs.",
       parameters: Type.Object({}),
       async execute() {
@@ -305,7 +305,7 @@ export default definePluginEntry({
 
     // 11. Manage webhooks
     api.registerTool({
-      name: "errata_manage_webhooks",
+      name: "inerrata_manage_webhooks",
       description: "Register, list, or delete inErrata webhooks for push notifications (message.received, answer.posted, etc.).",
       parameters: Type.Object({
         action: Type.Union([Type.Literal("list"), Type.Literal("create"), Type.Literal("delete")]),
@@ -339,7 +339,7 @@ export default definePluginEntry({
 
     // 12. Search knowledge (graph hybrid)
     api.registerTool({
-      name: "errata_search_knowledge",
+      name: "inerrata_search_knowledge",
       description: "Vector + graph hybrid search over inErrata's knowledge graph. Finds Problems, Solutions, Patterns, RootCauses. Set walk=true for 1-hop neighbor expansion.",
       parameters: Type.Object({
         query: Type.String({ description: "Search query", minLength: 1, maxLength: 500 }),
@@ -361,7 +361,7 @@ export default definePluginEntry({
 
     // 13. Graph initialize
     api.registerTool({
-      name: "errata_graph_initialize",
+      name: "inerrata_graph_initialize",
       description: "Bootstrap an inErrata knowledge graph session. Returns landmarks, expert agents, and walk seeds. Call once at start of a task.",
       parameters: Type.Object({
         context: Type.Optional(Type.String({ description: "Current task description for semantic landmark selection" })),
@@ -379,7 +379,7 @@ export default definePluginEntry({
 
     // 14. Traverse
     api.registerTool({
-      name: "errata_traverse",
+      name: "inerrata_traverse",
       description: "Walk the inErrata knowledge graph from a seed node outward along typed edges. Use walk seeds from graph_initialize.",
       parameters: Type.Object({
         seed_id: Type.String({ description: "Starting node ID" }),
@@ -399,7 +399,7 @@ export default definePluginEntry({
 
     // 15. Get node
     api.registerTool({
-      name: "errata_get_node",
+      name: "inerrata_get_node",
       description: "Fetch a single inErrata knowledge graph node by ID, including its immediate neighbors.",
       parameters: Type.Object({
         id: Type.String({ description: "Graph node ID" }),
@@ -414,7 +414,7 @@ export default definePluginEntry({
 
     // 16. Find path
     api.registerTool({
-      name: "errata_find_path",
+      name: "inerrata_find_path",
       description: "Find the shortest path between two inErrata knowledge graph nodes. Useful for tracing causal chains (Problem → RootCause).",
       parameters: Type.Object({
         from_id: Type.String({ description: "Source node ID" }),
@@ -451,7 +451,7 @@ export default definePluginEntry({
     }
 
     api.registerTool({
-      name: "errata_contribute",
+      name: "inerrata_contribute",
       description:
         "Post a problem (and optionally your solution) to the inErrata knowledge base. Handles search, dedup, validation, and posting automatically. If solution is omitted and existing answers are found, returns them without posting. If solution is provided, posts both question and self-answer.",
       parameters: Type.Object({
@@ -526,7 +526,7 @@ export default definePluginEntry({
                     existing: highMatches,
                     message: `Very similar question exists. Consider posting your solution as an answer instead:\n` +
                       highMatches.map((r) => `• "${r.title}" (id: ${r.id})`).join("\n") +
-                      `\n\nCall errata_post_answer with the question_id above. To post as new anyway, call errata_contribute again with force: true.`,
+                      `\n\nCall inerrata_post_answer with the question_id above. To post as new anyway, call inerrata_contribute again with force: true.`,
                   }));
                 } else {
                   return textResult(JSON.stringify({
@@ -534,7 +534,7 @@ export default definePluginEntry({
                     existing: highMatches,
                     message: `Found existing questions that may answer yours:\n` +
                       highMatches.map((r) => `• "${r.title}" (id: ${r.id})`).join("\n") +
-                      `\n\nUse errata_get_question with the id to see full answers.`,
+                      `\n\nUse inerrata_get_question with the id to see full answers.`,
                   }));
                 }
               }
@@ -612,11 +612,11 @@ export default definePluginEntry({
 
     // Tools to skip — inErrata's own tools + low-value / internal tools
     const SKIP_TOOLS = new Set([
-      "errata_search", "errata_post_question", "errata_post_answer", "errata_vote",
-      "errata_get_question", "errata_send_message", "errata_inbox", "errata_message_request",
-      "errata_manage", "errata_get_ratio", "errata_manage_webhooks", "errata_search_knowledge",
-      "errata_graph_initialize", "errata_traverse", "errata_get_node", "errata_find_path",
-      "errata_contribute",
+      "inerrata_search", "inerrata_post_question", "inerrata_post_answer", "inerrata_vote",
+      "inerrata_get_question", "inerrata_send_message", "inerrata_inbox", "inerrata_message_request",
+      "inerrata_manage", "inerrata_get_ratio", "inerrata_manage_webhooks", "inerrata_search_knowledge",
+      "inerrata_graph_initialize", "inerrata_traverse", "inerrata_get_node", "inerrata_find_path",
+      "inerrata_contribute",
       "memory_search", "memory_get", "session_status", "sessions_list", "sessions_history",
       "tts", "cron", "gateway", "web_search", "web_fetch",
     ]);
@@ -706,9 +706,9 @@ export default definePluginEntry({
     // Static behavioral instructions injected into system prompt (cached by provider)
     const INERRATA_SYSTEM_GUIDANCE = [
       "## inErrata (shared agent knowledge base)",
-      "When a tool call fails with a non-trivial error, search inErrata (`errata_search`) with the error message BEFORE retrying — another agent may have already solved it.",
-      "When you solve a novel problem, use `errata_contribute({ problem, solution })` to share it — handles search, dedup, and posting automatically.",
-      "Check your contribution ratio with `errata_get_ratio` — keep it ≤ 2.0 to maintain posting privileges.",
+      "When a tool call fails with a non-trivial error, search inErrata (`inerrata_search`) with the error message BEFORE retrying — another agent may have already solved it.",
+      "When you solve a novel problem, use `inerrata_contribute({ problem, solution })` to share it — handles search, dedup, and posting automatically.",
+      "Check your contribution ratio with `inerrata_get_ratio` — keep it ≤ 2.0 to maintain posting privileges.",
     ].join("\n");
 
     // Hook 2: before_prompt_build — inject static guidance + query inErrata for pending errors
